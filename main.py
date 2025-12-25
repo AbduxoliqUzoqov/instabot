@@ -2,24 +2,23 @@ from fastapi import FastAPI, Request, BackgroundTasks
 import asyncio, requests, yt_dlp
 
 BOT_TOKEN = "8403694475:AAHYzvDudxyNHthxueWAoRSIgu3OCigzwZc"
+
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 app = FastAPI()
+semaphore = asyncio.Semaphore(1)  # Fly free uchun 1 ta parallel
 
-# 🔥 BIR VAQTDA NECHTA VIDEO ISHLASHI
-semaphore = asyncio.Semaphore(5)  # 5 ta parallel
-
-def send_message(chat_id, text):
+def send(chat_id, text):
     requests.post(f"{API}/sendMessage", json={
         "chat_id": chat_id,
         "text": text
     })
 
-def process_video(chat_id, url):
-    async def _task():
+def worker(chat_id, url):
+    async def job():
         async with semaphore:
             try:
-                send_message(chat_id, "⏳ Navbatda, video tayyorlanmoqda...")
+                send(chat_id, "⏳ Video tayyorlanmoqda...")
 
                 ydl_opts = {
                     "format": "best[ext=mp4]/best",
@@ -31,7 +30,7 @@ def process_video(chat_id, url):
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=False)
                     video_url = info["url"]
-                    
+
                 requests.post(f"{API}/sendVideo", json={
                     "chat_id": chat_id,
                     "video": video_url,
@@ -39,9 +38,9 @@ def process_video(chat_id, url):
                 })
 
             except Exception as e:
-                send_message(chat_id, f"❌ Xatolik: {e}")
+                send(chat_id, f"❌ Xatolik: {e}")
 
-    asyncio.run(_task())
+    asyncio.run(job())
 
 @app.post("/webhook")
 async def webhook(req: Request, bg: BackgroundTasks):
@@ -54,8 +53,8 @@ async def webhook(req: Request, bg: BackgroundTasks):
     text = data["message"].get("text", "")
 
     if "instagram.com" not in text:
-        send_message(chat_id, "Instagram link yubor 📥")
+        send(chat_id, "Instagram link yubor 📥")
         return {"ok": True}
 
-    bg.add_task(process_video, chat_id, text)
+    bg.add_task(worker, chat_id, text)
     return {"ok": True}
